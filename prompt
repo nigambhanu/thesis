@@ -1,0 +1,237 @@
+ROLE: Senior Python/ML engineer + dissertation examiner.
+
+CONTEXT:
+- Repo: eligibility-aware, explainable multi-bank credit-card recommender
+  using RAG. Clean Architecture (domain / application / infrastructure).
+  Python 3.11, sentence-transformers (all-MiniLM-L6-v2, 384-dim), faiss-cpu,
+  transformers + bitsandbytes + torch, FastAPI + pydantic v2, pandas/numpy,
+  statsmodels, pytest, ragas, React+TS+Vite dashboard.
+- I already have EXECUTED notebook output and saved results on disk.
+  Treat the following files as GROUND-TRUTH REFERENCE — do NOT re-run the
+  long GPU evaluations. Only run cheap offline checks (pytest, mypy, ruff,
+  verify_setup, StubLLM smoke).
+- ABSOLUTE CONSTRAINT: fully offline. No HF Hub, no PyPI, no telemetry, no
+  paid APIs. Every model must load from a LOCAL path. If a model path is
+  unset, STOP and tell me which env var to point at a local dir.
+
+REFERENCE ARTIFACTS (already present, do not regenerate):
+  thesis_final_notebook.ipynb
+  results_final/results.json
+  results_final/RESULTS.md
+  results_final/dev_confirmation/results.json
+  results_final/dev_confirmation/RESULTS.md
+  results_final/predictions_A1_grounded.jsonl
+  results_final/predictions_A1_ungrounded.jsonl
+  data/gold_test_set.jsonl
+  data/eligibility_table.csv
+  data/rule_docs/{sbi,hdfc}_cards.md
+
+FILE LOCATION MAP (verify each before Stage 2 — if missing, print MISSING and continue, never fabricate):
+  results_final/results.json                  → primary numeric source (check which split(s) it contains)
+  results_final/RESULTS.md                    → rendered report from the same run
+  results_final/dev_confirmation/results.json → DEV / confirmation split
+  results_final/dev_confirmation/RESULTS.md   → DEV rendered report
+  results_final/predictions_A1_*.jsonl        → per-profile outputs (may be under results_final/ or a sub-dir)
+  thesis_final_notebook.ipynb                 → contains BOTH splits; TEST A1 grounded=0.400 appears in Step 11
+
+AUTHORITATIVE NUMBERS (use these exact values; never invent new ones):
+
+TEST SPLIT (40 profiles, Qwen2.5-7B, k=4) — notebook Step 11 + main RESULTS.md when present:
+  A1/RQ3:  grounded_accuracy=0.400, ungrounded_accuracy=0.000,
+           b=16, c=0, McNemar p≈3.05e-05, relative_error_reduction=0.400,
+           cards_returned grounded=1.000 vs ungrounded≈0.719,
+           verdict=HYPOTHESIS SUPPORTED
+  RQ1:     precision=0.953, recall=0.554, f1=0.701, accuracy=0.891,
+           majority_baseline=0.769, pos_rate_gold≈0.231, pos_rate_pred≈0.134
+  RQ2:     context_precision=1.000, context_recall=1.000  (SATURATED)
+  RQ4:     label_consistency=0.400, citation_validity≈0.988
+
+DEV / CONFIRMATION SPLIT (40 profiles) — results_final/dev_confirmation/ or the block with grounded≈0.225:
+  A1/RQ3:  grounded≈0.225, ungrounded=0.000, b=9, c=0, McNemar p≈0.0039
+  RQ1:     precision≈0.794, recall≈0.355, f1≈0.491, accuracy≈0.825
+
+ABLATIONS (core subset n=20 unless noted):
+  A2 (top-k):           k=1:0.15  k=2:0.05  k=3:0.35  k=4:0.35
+  A3 (pattern on/off):  on=0.35 vs off=0.75     <-- OFF WINS (needs explanation)
+  A4 (model):           3B=0.05 vs 7B=0.35
+  A5 (chunking):        atomic=0.35 vs coarse=0.85  <-- COARSE WINS (needs explanation)
+  A6 (normal/reworded): normal=0.35 vs reworded=0.70  (n=20 each)
+  RAGAS faithfulness:   NOT COMPUTED
+  Judge-vs-human kappa: MISSING
+
+TASK — run stages in order, print each header, do NOT touch the GPU:
+
+=== STAGE 0: OFFLINE GUARD (report only) ===
+Grep the repo and print a table:
+  file | line | snippet | offline-safe? Y/N
+
+Flag any of these patterns:
+  - from_pretrained( without a local-path / local_files_only=True argument
+  - huggingface.co, hf_hub_download, snapshot_download
+  - requests., httpx., urllib.request (outside tests/)
+  - openai, anthropic, cohere, google.generativeai
+  - !pip, subprocess.*pip, os.system(.*pip
+
+Confirm config/settings.py (or equivalent) sets:
+  HF_HUB_OFFLINE=1
+  TRANSFORMERS_OFFLINE=1
+If not, print the exact one-line change needed.
+Also list every env var that points to a model path (LLM_MODEL_NAME, etc.).
+If any required local path is unset, STOP and ask me for the path.
+
+=== STAGE 1: CHEAP GATES (report only, no code changes) ===
+Run and print PASS/FAIL + last 15 lines of output for each:
+  pytest -q tests
+  mypy src --ignore-missing-imports
+  ruff check src evaluation tests
+  python -m evaluation.verify_setup
+
+Do NOT modify any file in this stage.
+If a command is missing from PATH, print SKIPPED + reason and continue.
+
+=== STAGE 2: VERIFY results.json MATCHES RESULTS.md ===
+IMPORTANT — SPLIT AUTHORITY MAP (do not confuse these):
+- results_final/results.json and results_final/RESULTS.md may contain either
+  the TEST or the DEV numbers, or both. Read them first.
+- results_final/dev_confirmation/ always contains the DEV split (grounded≈0.225).
+- thesis_final_notebook.ipynb contains BOTH; the TEST A1 grounded=0.400 appears
+  ONLY in notebook Step 11 and is reference-only.
+
+0. Inspect results_final/results.json top-level structure (look for a "runs"
+   array or equivalent). Print how many runs it contains and, for each run,
+   its "split" field (if present) and A1 grounded_accuracy. This tells us
+   whether the file holds one split or both. Only then proceed to step 1.
+
+1. Load results_final/results.json and results_final/RESULTS.md.
+2. Print a side-by-side table of every metric that appears in both.
+   Flag any absolute discrepancy > 0.001. If they disagree, STOP.
+3. DEV-split check:
+   Confirm that whatever file holds the DEV numbers (dev_confirmation/ or the
+   main pair if it contains 0.225) shows grounded≈0.225, ungrounded=0.000,
+   b=9, c=0. Any mismatch > 0.001 → STOP.
+4. TEST-split check (notebook-only, reference only):
+   From thesis_final_notebook.ipynb Step 11 output, quote the TEST A1 block:
+   grounded 0.400, ungrounded 0.000, b=16, c=0, p≈3.05e-05.
+   State explicitly: "TEST numbers are notebook-only / reference; they are
+   quoted for context and are NOT required to match the JSON/MD pair above."
+   Do NOT attempt to reconcile 0.400 with 0.225.
+
+=== STAGE 3: ORACLE ISOLATION PROOF ===
+1. Print the full import block of src/domain/eligibility.py.
+2. Grep it (and its transitive imports) for:
+     rule_docs, data/rule_docs, chunks.parquet, faiss.index
+   Any hit = FAIL (spec requires oracle reads ONLY eligibility_table.csv).
+3. If tests/test_oracle_isolation.py is missing, print a proposed file that:
+   - imports src.domain.eligibility
+   - asserts no infrastructure / pipeline modules appear in its import graph
+   - monkeypatches open() / Path.open to raise on any path under data/rule_docs
+   - then calls the oracle on 5 profiles and asserts no exception
+   Do NOT write the file yet (see Stage 5).
+
+=== STAGE 4: ROOT-CAUSE ANALYSIS OF KNOWN WEAKNESSES ===
+Read-only. Answer each with file:line evidence and verbatim quotes.
+
+D1. POSITIVE-CLASS COLLAPSE (RQ1 recall 0.554 test / ≈0.355 dev, low pos_rate)
+    - Print the system prompt from GroundedPromptBuilder (src/model.py).
+    - Quote any asymmetric language ("only if certain", "when in doubt reject",
+      "prefer not recommended", etc.).
+    - Quote the decode config (temperature, do_sample, max_new_tokens).
+    - Search results_final/ recursively for predictions_A1_grounded.jsonl.
+      Reasons may be nested under a decisions/rows key; search recursively for
+      the first string field named "reason". If found, print the 5 most frequent
+      "reason" strings (first 80 chars). If not found, print
+      "MISSING — reason-level bias analysis skipped" and continue.
+
+D2. A3 INVERSION (pattern ON 0.35 vs OFF 0.75)
+    - Locate the prompt-pattern switch in evaluation/run_ablation.py.
+    - Print BOTH prompt variants side-by-side (or the exact string that is
+      added/removed).
+    - In one sentence state what the ON variant adds and why it could
+      plausibly hurt accuracy on this gold set.
+
+D3. A5 CONTRADICTION (atomic 0.35 vs coarse 0.85)
+    - Print RuleChunker (or the chunking logic) in src/pipeline.py.
+    - State how many chunks a typical 5-rule card produces under atomic vs coarse.
+    - Identify the code path in run_ablation.py that selects chunking mode.
+
+D4. RQ3 CONFOUND (ungrounded cards_returned_rate ≈0.72)
+    - Print UngroundedLLMClient in src/infrastructure/llm_client.py.
+    - Confirm whether it strips ONLY the "### RETRIEVED RULES" block or
+      ALSO the JSON schema / output-format instructions. Quote the stripping code.
+    - Verdict line (exactly): "If schema is stripped, ungrounded 0.0 accuracy
+      is partly a formatting artefact, not pure hallucination."
+
+D5. RAGAS / JUDGE-KAPPA GAP
+    - Does evaluation/ragas_faithfulness.py exist? List its top-level functions.
+    - Does it compute Cohen's kappa between a judge model and human labels?
+      Quote the function or say MISSING.
+    - Print judge_model_name and its default from config/settings.py (or
+      wherever it is defined).
+
+=== STAGE 5: PROPOSED FIXES (print diffs only — DO NOT APPLY) ===
+For each defect, output a unified diff (--- a/path +++ b/path).
+Minimal, correct, type-safe, docstring-preserving. Must stay mypy + ruff clean.
+
+F1 (D1): Symmetric grounded prompt. Required content (keep JSON schema identical):
+   "For each card, if the profile satisfies EVERY stated minimum for that card,
+    recommended MUST be true. Recommend false only when at least one stated
+    minimum is not met, and name that minimum in the reason."
+
+F2 (D1): Add an explicit tie-break line in the user turn:
+   "Tie-break: if you cannot find a violated minimum for a card whose bank
+    is in the requested list, mark recommended=true."
+   Keep temperature=0.0, do_sample=False.
+
+F3 (D4): Refactor UngroundedLLMClient so it strips ONLY the
+   "### RETRIEVED RULES" block and KEEPS the output-schema / JSON format
+   instructions. Add tests/test_ungrounded_schema.py that asserts the schema
+   block is still present in the ungrounded prompt.
+
+F4 (D5): Implement judge-validation kappa in ragas_faithfulness.py:
+   - function judge_validation_kappa(judge_labels, human_labels) using
+     sklearn.metrics.cohen_kappa_score
+   - CLI flag --judge-validation that loads data/judge_validation_sample.jsonl
+     (~20 rows). If the file is absent, create a SYNTHETIC stub with 20 rows
+     clearly marked "# SYNTHETIC — replace with human labels" in a header comment.
+   - print kappa and PASS/FAIL against threshold 0.80.
+
+F5 (D3): Do NOT change architecture. Add --chunking-mode {atomic,coarse,both}
+   to run_ablation.py with a docstring that states A5 reports the empirical
+   outcome honestly (coarse currently wins 0.85 vs 0.35) and that this is a
+   finding to be discussed in the thesis, not a bug.
+
+F6 (D2): Add a one-line comment above the prompt-pattern switch in
+   run_ablation.py that names exactly what the ON variant adds, so the A3
+   inversion is interpretable in the write-up.
+
+F7 (Stage 3): Write tests/test_oracle_isolation.py exactly as specified in Stage 3.
+
+=== STAGE 6: APPLY + VERIFY (wait for me to say "GO") ===
+On the single word "GO":
+  1. Apply F1–F7.
+  2. Re-run ONLY these cheap offline checks:
+       pytest -q tests
+       python -m evaluation.run_ablation --use-stub-llm --split test --limit 6
+            --arms A1 A3 A5 --out-dir /tmp/audit_after
+       python -m evaluation.verify_setup
+  3. Print a before/after table:
+       - test count (passed / failed)
+       - verify_setup PASS/FAIL
+       - oracle isolation PASS/FAIL
+       - ungrounded schema preserved Y/N
+       - judge-kappa function present Y/N
+       - StubLLM A1 / A3 / A5 numeric outputs
+         (sanity check only — the goal is that all three arms complete without
+          exception; stub numbers are not thesis results)
+
+Do NOT re-run real-LLM evaluations. My notebook outputs and results_final/
+remain the sole reference for those numbers.
+
+RULES:
+- Fully offline. Ask me for local model paths if unset.
+- Never touch data/rule_docs/ or data/eligibility_table.csv.
+- Preserve all existing docstrings and type hints.
+- Print full contents of every file you modify (no "..." ellipsis).
+- If a stage cannot run offline, print SKIPPED + reason and continue to the next stage.
+- Never invent numbers. Only use the AUTHORITATIVE NUMBERS listed above or
+  values read directly from results_final/ or the notebook.
